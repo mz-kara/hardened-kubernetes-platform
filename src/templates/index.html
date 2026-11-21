@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Guestbook</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 40rem; margin: 3rem auto; padding: 0 1rem; color: #222; }
+    h1 { font-size: 1.6rem; }
+    form { display: flex; gap: .5rem; margin-bottom: 2rem; }
+    input[type=text] { flex: 1; padding: .6rem; font-size: 1rem; border: 1px solid #bbb; border-radius: 6px; }
+    button { padding: .6rem 1.2rem; font-size: 1rem; border: 0; border-radius: 6px; background: #2d5be3; color: #fff; cursor: pointer; }
+    ul { list-style: none; padding: 0; }
+    li { padding: .7rem 0; border-bottom: 1px solid #eee; }
+    .empty { color: #888; }
+  </style>
+</head>
+<body>
+  <h1>Guestbook</h1>
+
+  <form method="post" action="/message">
+    <input type="text" name="text" maxlength="200" placeholder="Laisse un message…" required autofocus>
+    <button type="submit">Envoyer</button>
+  </form>
+
+  {% if messages %}
+    <ul>
+      {# Jinja échappe automatiquement le HTML : un message "<script>" s'affiche comme du texte (pas de XSS) #}
+      {% for m in messages %}<li>{{ m }}</li>{% endfor %}
+    </ul>
+  {% else %}
+    <p class="empty">Aucun message pour l'instant.</p>
+  {% endif %}
+</body>
+</html>
