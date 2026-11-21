@@ -1,0 +1,97 @@
+# --- kubectl : seul le master en a besoin ---
+- name: Installer kubectl
+  ansible.builtin.apt:
+    name: kubectl
+    state: present
+
+- name: Bloquer la mise à jour automatique de kubectl
+  ansible.builtin.dpkg_selections:
+    name: kubectl
+    selection: hold
+
+# --- Initialisation du cluster ---
+- name: Écrire la configuration de kubeadm
+  ansible.builtin.template:
+    src: kubeadm-config.yaml.j2
+    dest: /etc/kubernetes/kubeadm-config.yaml
+    mode: "0600"
+
+- name: Valider la configuration de kubeadm avant de l'utiliser
+  ansible.builtin.command: kubeadm config validate --config /etc/kubernetes/kubeadm-config.yaml
+  changed_when: false
+
+- name: Initialiser le cluster (une seule fois)
+  ansible.builtin.command: kubeadm init --config /etc/kubernetes/kubeadm-config.yaml
+  args:
+    creates: /etc/kubernetes/admin.conf   # déjà initialisé : la tâche est sautée
+
+# --- kubectl pour l'utilisateur ubuntu ---
+- name: Créer le dossier .kube
+  ansible.builtin.file:
+    path: "/home/{{ ansible_user }}/.kube"
+    state: directory
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+    mode: "0700"
+
+- name: Copier le kubeconfig administrateur (lisible par ubuntu seulement)
+  ansible.builtin.copy:
+    src: /etc/kubernetes/admin.conf
+    dest: "/home/{{ ansible_user }}/.kube/config"
+    remote_src: true
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+    mode: "0600"
+
+# --- Calico : le réseau des pods ---
+- name: Vérifier si Calico est déjà installé
+  ansible.builtin.command: kubectl get namespace tigera-operator
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  register: master_calico_ns
+  changed_when: false
+  failed_when: false
+
+- name: Installer les CRD et l'opérateur de Calico
+  ansible.builtin.command: "kubectl create -f {{ item }}"
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  loop:
+    - "https://raw.githubusercontent.com/projectcalico/calico/{{ calico_version }}/manifests/operator-crds.yaml"
+    - "https://raw.githubusercontent.com/projectcalico/calico/{{ calico_version }}/manifests/tigera-operator.yaml"
+  when: master_calico_ns.rc != 0
+  changed_when: true
+
+- name: Attendre que la ressource Installation de Calico soit connue de l'API
+  ansible.builtin.command: >-
+    kubectl wait --for=condition=Established
+    crd/installations.operator.tigera.io --timeout=120s
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  changed_when: false
+
+- name: Écrire la configuration de Calico
+  ansible.builtin.template:
+    src: calico-installation.yaml.j2
+    dest: /etc/kubernetes/calico-installation.yaml
+    mode: "0600"
+
+- name: Appliquer la configuration de Calico
+  ansible.builtin.command: kubectl apply -f /etc/kubernetes/calico-installation.yaml
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  register: master_calico_apply
+  changed_when: "'created' in master_calico_apply.stdout or 'configured' in master_calico_apply.stdout"
+
+- name: Attendre que le master soit prêt (réseau des pods opérationnel)
+  ansible.builtin.command: >-
+    kubectl wait --for=condition=Ready node/{{ inventory_hostname }} --timeout=300s
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  changed_when: false
+
+# --- Commande de jointure, récupérée ensuite par le rôle worker ---
+- name: Générer la commande de jointure des workers
+  ansible.builtin.command: kubeadm token create --print-join-command --ttl 1h
+  register: master_join_command
+  changed_when: false

@@ -1,0 +1,5 @@
+# Exécutés une seule fois, à la fin, et seulement si une tâche les a notifiés
+- name: Redémarrer containerd
+  ansible.builtin.systemd_service:
+    name: containerd
+    state: restarted

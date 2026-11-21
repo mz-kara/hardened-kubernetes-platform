@@ -1,0 +1,28 @@
+#cloud-config
+
+# Un administrateur, connexion par clé uniquement
+users:
+  - name: ubuntu
+    groups: [sudo]
+    shell: /bin/bash
+    sudo: "ALL=(ALL) NOPASSWD:ALL"
+    lock_passwd: true                 # aucun mot de passe utilisable
+    ssh_authorized_keys:
+      - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKT1ElnywnPf4Ophr/g0Fihh39kiqNANIE01WH0hs9W5 mehmed@debian-kara
+
+ssh_pwauth: false
+disable_root: true
+timezone: Europe/Paris
+
+# Les nœuds se connaissent par leur nom
+write_files:
+  - path: /etc/hosts
+    content: |
+      127.0.0.1 localhost
+      192.168.100.10 k8s-master
+      192.168.100.11 k8s-worker
+
+# Kubernetes refuse de démarrer avec du swap
+runcmd:
+  - swapoff -a
+  - sed -i '/\sswap\s/d' /etc/fstab

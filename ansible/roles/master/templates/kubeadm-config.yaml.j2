@@ -1,0 +1,20 @@
+# Configuration de kubeadm init, générée par Ansible
+apiVersion: kubeadm.k8s.io/v1beta4
+kind: InitConfiguration
+localAPIEndpoint:
+  advertiseAddress: "{{ ansible_host }}"    # IP du master sur le réseau du cluster
+  bindPort: 6443
+nodeRegistration:
+  name: "{{ inventory_hostname }}"
+  criSocket: unix:///run/containerd/containerd.sock
+---
+apiVersion: kubeadm.k8s.io/v1beta4
+kind: ClusterConfiguration
+controlPlaneEndpoint: "{{ ansible_host }}:6443"
+networking:
+  podSubnet: "{{ pod_cidr }}"
+  serviceSubnet: "{{ service_cidr }}"
+---
+apiVersion: kubelet.config.k8s.io/v1beta1
+kind: KubeletConfiguration
+cgroupDriver: systemd                        # le même que containerd

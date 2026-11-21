@@ -1,0 +1,5 @@
+# La commande vient du master : variable enregistrée par le rôle master
+- name: Rejoindre le cluster (une seule fois)
+  ansible.builtin.command: "{{ hostvars[groups['masters'][0]].master_join_command.stdout }}"
+  args:
+    creates: /etc/kubernetes/kubelet.conf   # déjà membre du cluster : la tâche est sautée
