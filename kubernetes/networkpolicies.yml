@@ -1,0 +1,96 @@
+# Segmentation réseau du namespace guestbook.
+# Principe : tout interdire, puis n'autoriser que les flux dont l'appli a besoin.
+#
+#   tout le monde --8080--> frontend --6379--> redis
+#                              |
+#                              +--53--> CoreDNS
+#
+# Le frontend est public ; seul le frontend peut joindre redis.
+
+# 1. Interdire tout le trafic, en entrée et en sortie, pour tous les pods du namespace
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: guestbook
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+---
+# 2. frontend : HTTP sur 8080, ouvert à tous (c'est le point d'entrée public de l'appli)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: frontend-allow-http
+  namespace: guestbook
+spec:
+  podSelector:
+    matchLabels:
+      app: guestbook
+      tier: frontend
+  policyTypes:
+    - Ingress
+  ingress:
+    - ports:
+        - protocol: TCP
+          port: 8080
+---
+# 3. frontend : ne peut joindre que redis (6379) et le DNS du cluster (53)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: frontend-allow-redis-and-dns
+  namespace: guestbook
+spec:
+  podSelector:
+    matchLabels:
+      app: guestbook
+      tier: frontend
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app: redis
+              tier: backend
+      ports:
+        - protocol: TCP
+          port: 6379
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+---
+# 4. redis : 6379 uniquement depuis le frontend ; aucune sortie (déjà interdite par la règle 1)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: redis-allow-frontend
+  namespace: guestbook
+spec:
+  podSelector:
+    matchLabels:
+      app: redis
+      tier: backend
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: guestbook
+              tier: frontend
+      ports:
+        - protocol: TCP
+          port: 6379
