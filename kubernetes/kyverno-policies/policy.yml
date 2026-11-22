@@ -189,7 +189,7 @@ spec:
 # 6. Pas de pods dans le namespace "default"
 # "default" n'a ni Pod Security, ni NetworkPolicies, ni RBAC dédié :
 # c'est là qu'un attaquant ou un admin pressé déploierait sans contrôle.
-apiVersion: kyverno.io/v1
+aapiVersion: kyverno.io/v1
 kind: ClusterPolicy
 metadata:
   name: disallow-default-namespace
@@ -207,9 +207,12 @@ spec:
       validate:
         failureAction: Enforce
         message: "Le namespace 'default' est interdit : utilisez un namespace dédié."
-        pattern:
-          metadata:
-            namespace: "!default"
+        deny:
+          conditions:
+            any:
+              - key: "{{ request.namespace }}"
+                operator: Equals
+                value: default
 
 ---
 # 7. Niveau "baseline" partout dans le cluster
