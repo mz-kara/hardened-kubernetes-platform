@@ -1,0 +1,36 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: kyverno-policies
+  namespace: argocd
+  annotations:
+    # Vague 0 : après le moteur Kyverno (vague -5)
+    argocd.argoproj.io/sync-wave: "0"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: platform
+  source:
+    repoURL: https://github.com/mz-kara/hardened-kubernetes-platform.git
+    targetRevision: main
+    path: kubernetes/kyverno-policies
+  destination:
+    server: https://kubernetes.default.svc
+    # Les ClusterPolicy n'ont pas de namespace : ce champ ne sert qu'aux objets
+    # qui en auraient un
+    namespace: kyverno
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      # Au premier démarrage, les CRD de Kyverno peuvent ne pas encore exister :
+      # on ne bloque pas la synchronisation pour autant
+      - SkipDryRunOnMissingResource=true
+    # En cas d'échec (CRD pas encore prêtes), on réessaie
+    retry:
+      limit: 5
+      backoff:
+        duration: 30s
+        factor: 2
+        maxDuration: 5m

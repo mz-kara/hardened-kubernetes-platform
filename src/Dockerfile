@@ -1,4 +1,5 @@
 FROM python:3.13-slim
+LABEL org.opencontainers.image.source=https://github.com/mz-kara/hardened-kubernetes-platform
 
 # Pas de fichiers .pyc écrits sur disque (compatible avec un système de fichiers
 # en lecture seule) et logs envoyés directement sur la sortie standard.

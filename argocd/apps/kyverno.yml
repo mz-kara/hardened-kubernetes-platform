@@ -1,0 +1,29 @@
+# Installe le moteur Kyverno (pods, CRD, webhooks d'admission)
+# depuis son chart Helm officiel.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: kyverno
+  namespace: argocd
+  annotations:
+    # Vague -5 : créé avant kyverno-policies (vague 0), qui a besoin des CRD
+    argocd.argoproj.io/sync-wave: "-5"
+  finalizers:
+    # Si cette Application est supprimée de Git, Kyverno est désinstallé
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: platform
+  source:
+    repoURL: https://kyverno.github.io/kyverno/
+    chart: kyverno
+    targetRevision: 3.8.1
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: kyverno
+  syncPolicy:
+    automated:
+      prune: true      # supprime ce qui a disparu de Git
+      selfHeal: true   # annule les modifications faites à la main
+    syncOptions:
+      - CreateNamespace=true   # crée le namespace kyverno
+      - ServerSideApply=true   # CRD trop grosses pour l'apply classique

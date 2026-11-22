@@ -1,0 +1,46 @@
+# AppProjects : définissent ce que chaque groupe d'Applications a le droit
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: platform
+  namespace: argocd
+  annotations:
+    # Vague -10 : les projets existent avant les Applications qui les utilisent
+    argocd.argoproj.io/sync-wave: "-10"
+spec:
+  description: Sécurité et supervision du cluster
+  sourceRepos:
+    - https://github.com/mz-kara/hardened-kubernetes-platform.git
+    - https://kyverno.github.io/kyverno/
+    - https://prometheus-community.github.io/helm-charts
+    - https://grafana.github.io/helm-charts
+    - https://falcosecurity.github.io/charts
+  destinations:
+    - server: https://kubernetes.default.svc
+      namespace: "*"
+  clusterResourceWhitelist:
+    - group: "*"
+      kind: "*"
+---
+# Projet "apps" : applications métier.
+# Uniquement le dépôt du projet, uniquement le namespace guestbook,
+# et aucun objet à l'échelle du cluster sauf le Namespace lui-même.
+# Même si quelqu'un ajoute un ClusterRole admin dans kubernetes/guestbook/,
+# Argo CD refusera de le déployer.
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: apps
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-10"
+spec:
+  description: Applications métier
+  sourceRepos:
+    - https://github.com/mz-kara/hardened-kubernetes-platform.git
+  destinations:
+    - server: https://kubernetes.default.svc
+      namespace: guestbook
+  clusterResourceWhitelist:
+    - group: ""
+      kind: Namespace

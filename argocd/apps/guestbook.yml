@@ -1,0 +1,21 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: guestbook
+  namespace: argocd
+  annotations:
+    # Vague 10 : après Kyverno et ses règles, pour que l'appli soit vérifiée
+    argocd.argoproj.io/sync-wave: "10"
+spec:
+  project: apps
+  source:
+    repoURL: https://github.com/mz-kara/hardened-kubernetes-platform.git
+    targetRevision: main
+    path: kubernetes/guestbook
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: guestbook
+  syncPolicy:
+    automated:
+      prune: true      # supprime ce qui a été retiré de Git
+      selfHeal: true   # annule les modifications faites à la main

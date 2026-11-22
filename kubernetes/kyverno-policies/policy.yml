@@ -1,0 +1,252 @@
+# Politiques Kyverno du cluster
+#
+# Deux familles de règles :
+#   - règles "applications" : uniquement dans le namespace guestbook
+#     (registre, tag, labels, ressources, sondes)
+#   - règles "cluster" : partout, sauf les namespaces système qui ont
+#     légitimement besoin d'accéder aux nœuds (CNI, monitoring, Falco...)
+#
+# failureAction :
+#   Enforce = la création est refusée
+#   Audit   = la création est acceptée, la violation est notée dans un PolicyReport
+#
+# Kyverno applique aussi automatiquement les règles "Pod" aux Deployments,
+# StatefulSets, DaemonSets, Jobs... (autogen) : un Deployment non conforme
+# est refusé dès le kubectl apply, pas seulement ses pods.
+
+---
+# 1. Registres autorisés
+# Empêche de lancer une image d'une source inconnue ou piégée
+# (typosquatting sur Docker Hub, image malveillante).
+# En entreprise : uniquement le registre interne (Harbor...).
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: restrict-image-registries
+  annotations:
+    policies.kyverno.io/title: Registres d'images autorisés
+    policies.kyverno.io/category: Supply chain
+spec:
+  background: true
+  rules:
+    - name: registres-autorises
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+              namespaces: [guestbook]
+      validate:
+        failureAction: Enforce
+        message: "Image refusée : seules les images de ghcr.io/mz-kara/ et l'image officielle redis sont autorisées."
+        pattern:
+          spec:
+            # =( ) : "si le champ existe, il doit respecter la règle"
+            =(initContainers):
+              - image: "ghcr.io/mz-kara/* | docker.io/redis:*"
+            =(ephemeralContainers):
+              - image: "ghcr.io/mz-kara/* | docker.io/redis:*"
+            containers:
+              - image: "ghcr.io/mz-kara/* | docker.io/redis:*"
+
+---
+# 2. Tag obligatoire, et jamais "latest"
+# "latest" change sans prévenir : déploiement non reproductible,
+# impossible de savoir quelle version tourne, retour arrière impossible.
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: disallow-latest-tag
+  annotations:
+    policies.kyverno.io/title: Interdire le tag latest
+    policies.kyverno.io/category: Supply chain
+spec:
+  background: true
+  rules:
+    - name: tag-obligatoire
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+              namespaces: [guestbook]
+      validate:
+        failureAction: Enforce
+        message: "Un tag d'image explicite est obligatoire (ex. :v1)."
+        pattern:
+          spec:
+            containers:
+              - image: "*:*"
+    - name: pas-de-latest
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+              namespaces: [guestbook]
+      validate:
+        failureAction: Enforce
+        message: "Le tag 'latest' est interdit : utilisez une version fixe."
+        pattern:
+          spec:
+            containers:
+              - image: "!*:latest"
+
+---
+# 3. Labels obligatoires
+# Les NetworkPolicies sélectionnent les pods par leurs labels.
+# Un pod sans labels app/tier échapperait aux règles d'autorisation
+# sans que personne ne s'en rende compte.
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-labels
+  annotations:
+    policies.kyverno.io/title: Labels app et tier obligatoires
+    policies.kyverno.io/category: Segmentation
+spec:
+  background: true
+  rules:
+    - name: labels-app-et-tier
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+              namespaces: [guestbook]
+      validate:
+        failureAction: Enforce
+        message: "Les labels 'app' et 'tier' sont obligatoires (utilisés par les NetworkPolicies)."
+        pattern:
+          metadata:
+            labels:
+              app: "?*"     # ?* = au moins un caractère
+              tier: "?*"
+
+---
+# 4. Ressources obligatoires
+# Sans limite mémoire, un seul pod (bug, fuite, attaque) peut saturer
+# le nœud et faire tomber tous les autres pods : déni de service.
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-requests-limits
+  annotations:
+    policies.kyverno.io/title: Requests et limits obligatoires
+    policies.kyverno.io/category: Disponibilité
+spec:
+  background: true
+  rules:
+    - name: requests-et-limite-memoire
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+              namespaces: [guestbook]
+      validate:
+        failureAction: Enforce
+        message: "requests.cpu, requests.memory et limits.memory sont obligatoires."
+        pattern:
+          spec:
+            containers:
+              - resources:
+                  requests:
+                    cpu: "?*"
+                    memory: "?*"
+                  limits:
+                    memory: "?*"
+
+---
+# 5. Sondes de santé
+# Sans readinessProbe, Kubernetes envoie du trafic à un pod pas encore prêt ;
+# sans livenessProbe, un pod bloqué n'est jamais redémarré.
+# En Audit : signalé dans les rapports, pas bloquant (à passer en Enforce
+# quand les sondes seront ajoutées aux Deployments).
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-probes
+  annotations:
+    policies.kyverno.io/title: Sondes de santé obligatoires
+    policies.kyverno.io/category: Disponibilité
+spec:
+  background: true
+  rules:
+    - name: liveness-et-readiness
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+              namespaces: [guestbook]
+      validate:
+        failureAction: Audit
+        message: "livenessProbe et readinessProbe sont recommandées."
+        pattern:
+          spec:
+            containers:
+              - livenessProbe:
+                  periodSeconds: ">0"
+                readinessProbe:
+                  periodSeconds: ">0"
+
+---
+# 6. Pas de pods dans le namespace "default"
+# "default" n'a ni Pod Security, ni NetworkPolicies, ni RBAC dédié :
+# c'est là qu'un attaquant ou un admin pressé déploierait sans contrôle.
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: disallow-default-namespace
+  annotations:
+    policies.kyverno.io/title: Interdire le namespace default
+    policies.kyverno.io/category: Multi-tenancy
+spec:
+  background: true
+  rules:
+    - name: pas-de-pod-dans-default
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+      validate:
+        failureAction: Enforce
+        message: "Le namespace 'default' est interdit : utilisez un namespace dédié."
+        pattern:
+          metadata:
+            namespace: "!default"
+
+---
+# 7. Niveau "baseline" partout dans le cluster
+# Le label PSA "restricted" ne protège que guestbook. Cette règle bloque les
+# évasions connues (privileged, hostPath, hostNetwork, hostPID...) dans TOUS
+# les namespaces, y compris ceux créés plus tard.
+# Exceptions : composants système qui ont réellement besoin du nœud.
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: baseline-everywhere
+  annotations:
+    policies.kyverno.io/title: Pod Security baseline sur tout le cluster
+    policies.kyverno.io/category: Pod Security
+spec:
+  background: true
+  rules:
+    - name: baseline
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+      exclude:
+        any:
+          - resources:
+              namespaces:
+                - kube-system        # kube-proxy, etcd, API server
+                - calico-system      # CNI : accès réseau du nœud
+                - calico-apiserver
+                - tigera-operator
+                - kyverno
+                - monitoring         # node-exporter : hostNetwork, hostPID
+                - logging            # Alloy : lit les logs du nœud (hostPath)
+                - falco              # Falco : observe le noyau
+                - kube-bench         # audit CIS : lit les fichiers du nœud
+      validate:
+        failureAction: Enforce
+        podSecurity:
+          level: baseline
+          version: latest
