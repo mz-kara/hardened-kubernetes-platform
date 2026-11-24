@@ -8,6 +8,7 @@ metadata:
   annotations:
     # Vague -5 : créé avant kyverno-policies (vague 0), qui a besoin des CRD
     argocd.argoproj.io/sync-wave: "-5"
+    argocd.argoproj.io/compare-options: ServerSideDiff=true
   finalizers:
     # Si cette Application est supprimée de Git, Kyverno est désinstallé
     - resources-finalizer.argocd.argoproj.io
